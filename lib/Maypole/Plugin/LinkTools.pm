@@ -3,7 +3,7 @@ package Maypole::Plugin::LinkTools;
 use warnings;
 use strict;
 
-our $VERSION = '0.1';
+our $VERSION = '0.2';
 
 =head1 NAME
 
@@ -39,11 +39,19 @@ C<maybe_many_link_views> method.
 Centralises all path manipulation, so that a new URI scheme can be implemented site-wide by 
 overriding just two methods (C<Maypole::parse_path()> and C<Maypole::Plugin::LinkTools::make_path()>).
 
+For ease of use with the Template Toolkit, C<make_path>, C<link> and
+C<link_view> will also accept a hashref of arguments. For example:
+
+    print $request->make_path({ table      => $table,
+                                action     => $action,
+                                additional => $additional,
+                             });
+
 =head1 METHODS
 
 =over 4
 
-=item make_path( %args )
+=item make_path( %args or \%args )
 
 This is the counterpart to C<Maypole::parse_path>. It generates a path to use in links, 
 form actions etc. To implement your own path scheme, just override this method and C<parse_path>.
@@ -53,25 +61,29 @@ form actions etc. To implement your own path scheme, just override this method a
               additional => $additional,    # optional - generally an object ID
               );
 
+C<id> can be used as an alternative key to C<additional>.
+
 =cut
 
 sub make_path
 {
-    my ( $self, %args ) = @_;
+    my $r = shift;
+    my %args = (@_ == 1 && ref $_[0] && ref $_[0] eq 'HASH') ? %{$_[0]} : @_;
 
     do { die "no $_" unless $args{ $_ } } for qw( table
                                                   action
                                                   );    
 
-    my $base = $self->config->uri_base;
+    my $base = $r->config->uri_base;
     $base = '' if $base eq '/';
-        
+
+    $args{additional} ||= $args{id};
     my $add = $args{additional} ? "/$args{additional}" : '';
     
     return sprintf '%s/%s/%s%s', $base, $args{table}, $args{action}, $add;
 }
         
-=item link( %args )
+=item link( %args or \%args )
 
 Returns a link, calling C<make_path> to generate the path. 
 
@@ -81,25 +93,36 @@ Returns a link, calling C<make_path> to generate the path.
               label      => $label,
               );
 
+The table can be omitted and defaults to that of the request's model.
+C<id> can be used as an alternative key to C<additional>.
+
 =cut
 
 sub link
 {
-    my ( $r, %args ) = @_;
+    my $r = shift;
+    my %args = (@_ == 1 && ref $_[0] && ref $_[0] eq 'HASH') ? %{$_[0]} : @_;
     
-    do { die "no $_ (got table: $args{table} action: $args{action} label: $args{label})" 
-        unless $args{ $_ } } for qw( table action label );    
+    $args{table} ||= $r->model_class->table;
+    
+    foreach my $key ( qw( table action label ) )
+    { 
+        die sprintf "link: no %s (got table: %s action: %s label: %s)",
+            $key, $args{table} || '', $args{action} || '', $args{label} || '' 
+                unless $args{ $key };
+    } 
     
     my $path = $r->make_path( %args );
     
     return sprintf '<a href="%s">%s</a>', $path, $args{label};
 }
 
-=item link_view( $thing or %args )
+=item link_view( $thing or %args or \%args )
 
-If passed a single argument, assumes it is a Maypole object and builds a link to its C<view> template. 
+Build a link to the C<view> action of the given item.
+If passed a Maypole request object, builds a link to its C<view> action. 
 
-    print $request->link_view( $thing );
+    print $request->link_view( $maypole_request );
     
     print $request->link_view( table      => $table,
                                label      => $label,
@@ -112,24 +135,36 @@ sub link_view
 {
     my $r = shift;
     
+    my %args;
+    
     if ( @_ == 1 )
     {
-        my $object = shift;
-        
-        return $r->link( table  => $object->table,
-                         action => 'view',
-                         additional => $object->id,
-                         label  => $object,
-                         );
+        die "single argument to link_view() must be a reference (got $_[0])" unless ref $_[0];
+    
+        if ( ref $_[0] eq 'HASH' )
+        {
+            %args = %{ $_[0] };
+        }
+        elsif ( UNIVERSAL::isa( $_[0], 'Maypole::Model::Base' ) )
+        {
+            my $object = shift;
+            
+            %args = ( table      => $object->table,
+                      additional => $object->id,
+                      label      => '' . $object,
+                      );
+        }
+        else
+        {
+            die "unsuitable single argument to link_view (got $_[0]) - need hashref or Maypole/CDBI object";
+        }
     }
     else
     {
-        my %args = @_;
-        
-        return $r->link( %args,  
-                         action => 'view',
-                         );
+        %args = @_;
     }
+    
+    return $r->link( %args, action => 'view' );
 }
 
 =item maybe_link_view( $thing )
@@ -155,7 +190,7 @@ sub maybe_link_view
 
 =item maybe_many_link_views
 
-Runs multiple items through C<maybe_link_view>..
+Runs multiple items through C<maybe_link_view>, returning a list.
 
 =cut
 
