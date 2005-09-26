@@ -3,7 +3,7 @@ package Maypole::Plugin::LinkTools;
 use warnings;
 use strict;
 
-our $VERSION = '0.2';
+our $VERSION = '0.21';
 
 =head1 NAME
 
@@ -65,6 +65,9 @@ C<id> can be used as an alternative key to C<additional>.
 
 =cut
 
+# TODO:
+# C<$additional> can be a string, an arrayref, or a hashref. An arrayref is expanded into extra 
+# path elements, whereas a hashref is translated into a query string. 
 sub make_path
 {
     my $r = shift;
@@ -104,8 +107,9 @@ sub link
     my %args = (@_ == 1 && ref $_[0] && ref $_[0] eq 'HASH') ? %{$_[0]} : @_;
     
     $args{table} ||= $r->model_class->table;
+    $args{label} ||= '...'; # in case a stringify column is left empty
     
-    foreach my $key ( qw( table action label ) )
+    foreach my $key ( qw( table action ) )
     { 
         die sprintf "link: no %s (got table: %s action: %s label: %s)",
             $key, $args{table} || '', $args{action} || '', $args{label} || '' 
@@ -149,9 +153,13 @@ sub link_view
         {
             my $object = shift;
             
+            my $str = ''.$object;
+            warn sprintf "%s (id: %s) object has no data for stringification", ref($object), $object->id unless $str;
+            $str ||= '...';
+            
             %args = ( table      => $object->table,
                       additional => $object->id,
-                      label      => '' . $object,
+                      label      => $str,
                       );
         }
         else
